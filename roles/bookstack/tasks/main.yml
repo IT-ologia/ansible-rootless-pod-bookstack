@@ -1,0 +1,125 @@
+---
+# tasks file for roles/bookstack
+
+- name: "Create the directories"
+  ansible.builtin.file:
+    path: "{{ homedir }}/{{ item }}"
+    state: directory
+    owner: devops
+    group: devops
+    mode: 0755
+  loop:
+    - bookstack
+    - bookstack/mariadb_config
+    - bookstack/bookstack_config
+  become: true
+
+- name: "Create the bookstack pod"
+  containers.podman.podman_pod:
+    name: bookstack
+    state: created
+    publish: 8888:8888
+
+- name: "Podman unshare - Change ownership for the mariadb_config directory"
+  ansible.builtin.command: "podman unshare chown 1000:1000 mariadb_config"
+  args:
+    chdir: "{{ homedir }}/bookstack"
+
+- name: "Create the bookstack_db container"
+  containers.podman.podman_container:
+    pod: bookstack
+    image: "{{ container_registry }}/linuxserver/mariadb"
+    name: bookstack_db
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      MYSQL_ROOT_PASSWORD: "bookstack"
+      TZ: "Europe/Berlin"
+      MYSQL_DATABASE: "bookstackapp"
+      MYSQL_USER: "bookstack"
+      MYSQL_PASSWORD: "bookstack"
+    volume:
+      - "{{ homedir }}/bookstack/mariadb_config:/config:Z"
+    state: started
+
+- name: "Podman unshare - Change ownership for the bookstack_config diectory"
+  ansible.builtin.command: "podman unshare chown 1000:1000 bookstack_config"
+  args:
+    chdir: "{{ homedir }}/bookstack"
+
+- name: "Create the bookstack_app container"
+  containers.podman.podman_container:
+    pod: bookstack
+    image: "{{ container_registry }}/linuxserver/bookstack"
+    name: bookstack_app
+    env:
+      PUID: "1000"
+      PGID: "1000"
+      APP_URL: "https://{{ ansible_fqdn }}:8888"
+      TZ: "Europe/Berlin"
+      DB_HOST: "bookstack_db"
+      DB_PORT: "3306"
+      DB_USER: "bookstack"
+      DB_PASS: "bookstack"
+      DB_DATABASE: "bookstackapp"
+    volume:
+      - "{{ homedir }}/bookstack/bookstack_config:/config:Z"
+
+- name: "Copy the /etc/nginx configuration files for nginx"
+  ansible.builtin.copy:
+    src: files/nginx_etcnginx
+    dest: "{{ homedir }}/bookstack"
+    owner: devops
+    group: devops
+    mode: 0644
+  become: true
+
+- name: "Template the /etc/nginx/ssl.conf for nginx"
+  ansible.builtin.template:
+    src: templates/ssl.conf.j2
+    dest: "{{ homedir }}/bookstack/nginx_etcnginx/ssl.conf"
+    owner: devops
+    group: devops
+    mode: 0644
+  become: true
+
+- name: "Copy the /etc/ssl/private configuration files for nginx"
+  ansible.builtin.copy:
+    src: files/nginx_etcsslprivate
+    dest: "{{ homedir }}/bookstack/nginx_etcsslprivate"
+    owner: devops
+    group: devops
+    mode: 0644
+  become: true
+
+- name: "Copy the certificate and its key for nginx"
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ homedir }}/bookstack/nginx_etcsslprivate"
+    owner: devops
+    group: devops
+    mode: 0644
+  with_fileglob: "files/{{ ansible_hostname }}.*"
+  become: true
+
+- name: "Podman unshare - Change ownership for the nginx_etcnginx & nginx_etcsslprivate directories"
+  ansible.builtin.command: "podman unshare chown -R 101:101 nginx_etcnginx nginx_etcsslprivate"
+  args:
+    chdir: "{{ homedir }}/bookstack"
+
+- name: "Create the bookstack_http container"
+  containers.podman.podman_container:
+    pod: bookstack
+    image: "{{ container_registry }}/library/nginx:stable-alpine"
+    name: bookstack_http
+    volumes:
+      - "{{ homedir }}/bookstack/nginx_etcnginx:/etc/nginx:Z"
+      - "{{ homedir }}/bookstack/nginx_etcsslprivate:/etc/ssl/private:Z"
+
+- name: "Enable 8888/tcp inbound in the firewall"
+  ansible.posix.firewalld:
+    port: 8888/tcp
+    permanent: true
+    immediate: true
+    state: enabled
+  become: true

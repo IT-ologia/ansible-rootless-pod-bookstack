@@ -1,0 +1,9 @@
+---
+- name: Deploy apps on the podman servers
+  hosts: all
+  serial: 1
+  gather_facts: yes
+  
+  roles:
+    - role: podmanhost
+    - role: bookstack

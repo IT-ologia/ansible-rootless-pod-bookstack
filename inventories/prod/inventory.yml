@@ -1,0 +1,8 @@
+prod:
+  children:
+    podman_servers:
+
+podman_servers:
+  hosts:
+    production:
+      ansible_host: prod.devops

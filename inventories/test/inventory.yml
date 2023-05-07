@@ -1,0 +1,10 @@
+test:
+  children:
+    podman_servers:
+
+podman_servers:
+  hosts:
+    test1:
+      ansible_host: test1.devops
+    test2:
+      ansible_host: test2.devops

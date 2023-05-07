@@ -1,0 +1,37 @@
+---
+- name: "Playbook to backup bookstack pod"
+  hosts: all
+  serial: 1
+  gather_facts: yes
+  vars:
+    homedir: /home/devops
+
+  tasks:
+    - name: "Stop the bookstack pod"
+      containers.podman.podman_pod:
+        name: bookstack
+        state: stopped
+
+    - name: "Create an archive from the volumes of the bookstack pod"
+      community.general.archive:
+        path:
+          - "{{ homedir }}/bookstack/mariadb_config"
+          - "{{ homedir }}/bookstack/bookstack_config"
+ #         - "{{ homedir }}/bookstack/nginx_etcnginx"
+ #         - "{{ homedir }}/bookstack/nginx_etcsslprivate"
+        dest: "{{ homedir }}/bookstack/bookstack.tgz"
+        owner: devops
+        group: devops
+      become: true
+
+    - name: "Copy the backup archive from remote to local"
+      ansible.builtin.fetch:
+        src: "{{ homedir }}/bookstack/bookstack.tgz"
+        dest: "backup/backup-bookstack-{{ ansible_fqdn }}-{{ ansible_date_time.iso8601_basic_short }}.tgz"
+        flat: yes
+    
+    - name: "Start the bookstack pod"
+      containers.podman.podman_pod:
+        name: bookstack
+        state: started
+        publish: 8888:8888
